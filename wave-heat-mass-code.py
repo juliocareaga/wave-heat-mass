@@ -3,7 +3,7 @@
 # latest version: september 2024
 # main code developed for the paper: Westervelt-based modeling of 
 #                                    ultrasound-enhanced drug delivery
-# co-authors: V. Nikolić and B. Said-Houari
+# authors: J. Careaga, V. Nikolić and B. Said-Houari
 #---------------------------------------------------------------------
 from dolfinx      import plot, mesh, fem, io, geometry
 from dolfinx.io   import XDMFFile, gmshio
@@ -24,9 +24,6 @@ try:
 except ModuleNotFoundError:
     print("This demo requires gmsh to be installed")
     exit(0)
-
-## The version (Wave-Eq)/(B(Theta)) has been commented; 
-## search for the symbol if : (***)/B(Theta)
 
 #---------------------------------------------!
 # Time discretization: 
@@ -89,7 +86,7 @@ inc = 0
 #===============================================
 # Mesh creation
 #domain   = mesh.create_rectangle(MPI.COMM_WORLD, mysquare,[40, 40], mesh.CellType.triangle)
-with XDMFFile(MPI.COMM_WORLD, "mesh-half-circle-square.xdmf", "r") as file0:
+with XDMFFile(MPI.COMM_WORLD, "mesh-half-circle-square0.xdmf", "r") as file0:
     domain = file0.read_mesh(name = "Grid")
 #======================================================================================================
 # Vector spaces
@@ -188,11 +185,6 @@ zeta0 = 1.0/(2.0*math.gamma(2.0 - alpha_caputo))
 zetaj = lambda ii: zeta0*((ii + 1.0)**(1.0 - alpha_caputo) - (ii-1.0)**(1.0 - alpha_caputo))
 #------------------------------------------------------------------------------------------------
 ## Commented is the version after dividing by B(\Theta)
-#CC1 = lambda ss, p_ast: (1.0 - 2.0*kk(ss + thetaa)*p_ast)/bb(ss + thetaa)                          ## --> (***)/B(Theta)
-#CC2 = lambda ss: tau*tau*(beta*qq(ss + thetaa)/bb(ss + thetaa) + gamma*zeta0*tau**(-alpha_caputo)) ## --> (***)/B(Theta)
-#Q   = lambda ss: qq(ss + thetaa)/bb(ss + thetaa)                                                   ## --> (***)/B(Theta)
-#FF  = lambda ss, pt: 2.0*kk(ss + thetaa)*pt*pt/bb(ss + thetaa)                                     ## --> (***)/B(Theta)
-
 CC1 = lambda ss, p_ast: (1.0 - 2.0*kk(ss + thetaa)*p_ast)
 CC2 = lambda ss: tau*tau*(beta*qq(ss + thetaa) + gamma*bb(ss + thetaa)*zeta0*tau**(-alpha_caputo))
 Q   = lambda ss: qq(ss + thetaa)
@@ -203,13 +195,6 @@ taualph = tau**(1 - alpha_caputo)
 
 ##-----------------------------------------------------------------------------------------------
 ### Spatial operators:
-#def operators_wave_Newmark(tt): ## --> (***)/B(Theta)
-#    a_wave  = CC1(theta,pp)*uu*v*ufl.dx + ufl.dot(ufl.grad(uu),ufl.grad(CC2(theta)*v))*ufl.dx
-#    f_wave = (FF(theta,dp)*v - ufl.dot(ufl.grad(pp_pred), ufl.grad(Q(theta)*v)))*ufl.dx
-#    f_wave += -taualph*ufl.dot(ufl.grad(dp_caputo),ufl.grad(v))*ufl.dx   
-#    f_wave += -taualph*zeta0*ufl.dot(ufl.grad(dp_pred),ufl.grad(v))*ufl.dx   
-#    return a_wave, f_wave       ## --> (***)/B(Theta)
-
 def operators_wave_Newmark(tt):
     a_wave  = CC1(theta,pp)*uu*v*ufl.dx + ufl.dot(ufl.grad(uu),ufl.grad(CC2(theta)*v))*ufl.dx
     f_wave = (FF(theta,dp)*v - ufl.dot(ufl.grad(pp_pred), ufl.grad(Q(theta)*v)))*ufl.dx
@@ -233,9 +218,17 @@ def operators_mass(tt):
 def time_iteration_Newmark(t, ddp, dp, pp, pp_pred, dp_pred):
     error    = tol + 1.0
     iter_fpi = 0    
+    nn_ = int(t/tau)
+    valN0, dtvalN, ddtvalN0 = boundaryfunction(0)   
+    dtvalN_nonlocal = zeta0*(nn_**(1-alpha_caputo) - (nn_-1)**(1-alpha_caputo))*dtvalN
+    for j in range(nn_-1):
+        valN0, dtvalN, ddtvalN0 = boundaryfunction(tau*(j+1))
+        dtvalN_nonlocal   = dtvalN_nonlocal + zetaj(j+1)*dtvalN
     valN, dtvalN, ddtvalN = boundaryfunction(t)
-    #uNg.interpolate(lambda x: (qq(thetaa)/bb(thetaa))*valN + dtvalN + 0*x[0]) ## --> (***)/B(Theta)
-    uNg.interpolate(lambda x: qq(thetaa)*valN + bb(thetaa)*dtvalN + 0*x[0])
+    dtvalN_nonlocal = dtvalN_nonlocal + zetaj(0)*dtvalN
+    uNg.interpolate(lambda x: qq(thetaa)*valN + bb(thetaa)*dtvalN_nonlocal + 0*x[0])
+    
+    
     pp_pred.x.array[:] = pp.x.array + tau*dp.x.array + tau*tau*(0.5 - beta)*ddp.x.array
     dp_pred.x.array[:] = dp.x.array + (1 - gamma)*tau*ddp.x.array
     
